@@ -1,11 +1,17 @@
+#!/usr/local/bin/guile \
+-e main -s
+!#
+(use-modules (srfi srfi-1))
 (use-modules (srfi srfi-9))
 (use-modules (ice-9 threads))
+(use-modules (ice-9 match))
+(use-modules (ice-9 local-eval))
 
 (define-record-type <node>
   (%make-node name mutex deps-count dependent-nodes commands) ;mutex guards deps-count
   node?
-  (name    node-name)
-  (mutex     node-mutex)
+  (name node-name)
+  (mutex node-mutex)
   (deps-count  node-deps-count set-node-deps-count!)
   (dependent-nodes node-dependent-nodes set-node-dependent-nodes!)
   (commands node-commands set-node-commands!))
@@ -45,17 +51,17 @@
               (map (lambda (node) (call-with-new-thread (lambda () (compute-node node)))) root-nodes)))
   (display "Trud skończony") (newline))
 
-
-;; example:
-;; TODO: provide API, more convinient declaration of dependencies etc. For now it's raw example
-
-(define node1a (make-node "node1a" '("sleep 3")))
-(define node1b (make-node "node1b" '("sleep 5")))
-(define node2 (make-node "node2" '("sleep 1")))
-(define node3a (make-node "node3a" '("sleep 2")))
-(define node3b (make-node "node3b" '("sleep 3")))
-(set-dependent! node1a node2)
-(set-dependent! node1b node2)
-(set-dependent! node2 node3a)
-(set-dependent! node2 node3b)
-(run (list node1a node1b node2 node3a node3b))
+(define (main args)
+  (let* ((file-descriptors (cdr args))
+         (graph-definitions (if (null? file-descriptors)
+                                (list (read))
+                                (map (lambda (descriptor) (call-with-input-file descriptor read)) file-descriptors)))
+         (node-list '())
+         (node (lambda (name .  commands) (set! node-list (cons (make-node name commands) node-list))))
+         (dep (lambda (parent-name child-name) (set-dependent! (find (lambda (node) (eq? (node-name node) parent-name)) node-list)
+                                                          (find (lambda (node) (eq? (node-name node) child-name)) node-list))))
+         (environment (the-environment)))
+    (for-each (lambda (graph-definition)
+                (for-each (lambda (def) (local-eval def environment)) graph-definition))
+              graph-definitions)
+    (run node-list)))
